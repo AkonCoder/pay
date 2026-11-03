@@ -5,55 +5,52 @@ declare(strict_types=1);
 namespace Yansongda\Pay\Plugin\Alipay;
 
 use Closure;
-use Yansongda\Pay\Contract\PluginInterface;
-use Yansongda\Pay\Exception\Exception;
-use Yansongda\Pay\Exception\InvalidResponseException;
-use Yansongda\Pay\Logger;
-use Yansongda\Pay\Parser\NoHttpRequestParser;
-use Yansongda\Pay\Rocket;
-use Yansongda\Supports\Collection;
-use Yansongda\Supports\Str;
+use Yansongda\Artful\Contract\PluginInterface;
+use Yansongda\Artful\Direction\NoHttpRequestDirection;
+use Yansongda\Artful\Exception\ContainerException;
+use Yansongda\Artful\Exception\InvalidConfigException;
+use Yansongda\Artful\Exception\ServiceNotFoundException;
+use Yansongda\Artful\Logger;
+use Yansongda\Artful\Rocket;
+use Yansongda\Pay\Config\AlipayConfig;
+use Yansongda\Pay\Exception\InvalidSignException;
+use Yansongda\Pay\Pay;
+use Yansongda\Pay\Traits\AlipayTrait;
+
+use function Yansongda\Artful\filter_params;
 
 class CallbackPlugin implements PluginInterface
 {
+    use AlipayTrait;
+
     /**
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\InvalidConfigException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     * @throws \Yansongda\Pay\Exception\InvalidResponseException
+     * 支付宝异步通知（V2 form 参数格式，V2/V3 接口的报文与验签组串同构）：
+     * 除去 `sign`/`sign_type` 后按字典序组串 + RSA2 验签；不校验 SN、无时间戳环节、无条件强制.
+     *
+     * @throws ContainerException
+     * @throws InvalidConfigException
+     * @throws ServiceNotFoundException
+     * @throws InvalidSignException
      */
     public function assembly(Rocket $rocket, Closure $next): Rocket
     {
-        Logger::info('[alipay][CallbackPlugin] 插件开始装载', ['rocket' => $rocket]);
+        Logger::debug('[Alipay][CallbackPlugin] 插件开始装载', ['rocket' => $rocket]);
 
-        $this->formatPayload($rocket);
+        $params = $rocket->getParams();
 
-        if (!($rocket->getParams()['sign'] ?? false)) {
-            throw new InvalidResponseException(Exception::INVALID_RESPONSE_SIGN, '', $rocket->getParams());
-        }
+        /** @var AlipayConfig $config */
+        $config = self::getProviderConfig(Pay::PROVIDER_ALIPAY, $params);
 
-        verify_alipay_sign($rocket->getParams(), $this->getSignContent($rocket->getPayload()), base64_decode($rocket->getParams()['sign']));
+        $value = filter_params($params, fn ($k, $v) => '' !== $v && 'sign' != $k && 'sign_type' != $k);
 
-        $rocket->setDirection(NoHttpRequestParser::class)
+        self::verifyAlipaySign($config, $value->sortKeys()->toQueryString(), $params['sign'] ?? '');
+
+        $rocket->setPayload($params)
+            ->setDirection(NoHttpRequestDirection::class)
             ->setDestination($rocket->getPayload());
 
-        Logger::info('[alipay][CallbackPlugin] 插件装载完毕', ['rocket' => $rocket]);
+        Logger::info('[Alipay][CallbackPlugin] 插件装载完毕', ['rocket' => $rocket]);
 
         return $next($rocket);
-    }
-
-    protected function formatPayload(Rocket $rocket): void
-    {
-        $payload = (new Collection($rocket->getParams()))->filter(function ($v, $k) {
-            return '' !== $v && !is_null($v) && 'sign' != $k && 'sign_type' != $k && !Str::startsWith($k, '_');
-        });
-
-        $rocket->setPayload($payload);
-    }
-
-    protected function getSignContent(Collection $payload): string
-    {
-        return urldecode($payload->sortKeys()->toString());
     }
 }

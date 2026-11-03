@@ -1,0 +1,108 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Yansongda\Pay\Config;
+
+use Yansongda\Artful\Exception\InvalidConfigException;
+use Yansongda\Pay\Enum\PayMode;
+use Yansongda\Pay\Exception\Exception;
+
+class JsbConfig extends AbstractConfig
+{
+    private string $svrCode = '';
+    private string $partnerId = '';
+    private string $publicKeyCode = '';
+    private string $mchSecretCertPath = '';
+    private ?string $mchPublicCertPath = null;
+    private string $jsbPublicCertPath = '';
+    private ?string $notifyUrl = null;
+
+    public function setSvrCode(string $value): void
+    {
+        $this->svrCode = $value;
+    }
+
+    public function setPartnerId(string $value): void
+    {
+        $this->partnerId = $value;
+    }
+
+    public function setPublicKeyCode(string $value): void
+    {
+        $this->publicKeyCode = $value;
+    }
+
+    public function setMchSecretCertPath(string $value): void
+    {
+        $this->mchSecretCertPath = $value;
+    }
+
+    public function setMchPublicCertPath(?string $value): void
+    {
+        $this->mchPublicCertPath = $value;
+    }
+
+    public function setJsbPublicCertPath(string $value): void
+    {
+        $this->jsbPublicCertPath = $value;
+    }
+
+    public function setNotifyUrl(?string $value): void
+    {
+        $this->notifyUrl = $value;
+    }
+
+    public function getSvrCode(): string
+    {
+        return $this->svrCode;
+    }
+
+    public function getPartnerId(): string
+    {
+        return $this->partnerId;
+    }
+
+    public function getPublicKeyCode(): string
+    {
+        return $this->publicKeyCode;
+    }
+
+    public function getMchSecretCertPath(): string
+    {
+        return $this->mchSecretCertPath;
+    }
+
+    public function getMchPublicCertPath(): ?string
+    {
+        return $this->mchPublicCertPath;
+    }
+
+    public function getJsbPublicCertPath(): string
+    {
+        return $this->jsbPublicCertPath;
+    }
+
+    public function getNotifyUrl(): ?string
+    {
+        return $this->notifyUrl;
+    }
+
+    /**
+     * @throws InvalidConfigException 缺少必要配置参数
+     */
+    protected function supportedModes(): array
+    {
+        // 江苏银行无服务商模式
+        return [PayMode::NORMAL, PayMode::SANDBOX];
+    }
+
+    protected function validateRequired(): void
+    {
+        $this->validateNotEmpty(
+            ['partnerId', 'publicKeyCode', 'mchSecretCertPath', 'jsbPublicCertPath'],
+            Exception::CONFIG_JSB_INVALID,
+            '配置异常: 缺少江苏银行配置'
+        );
+    }
+}

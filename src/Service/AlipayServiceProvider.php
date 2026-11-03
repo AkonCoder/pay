@@ -4,26 +4,19 @@ declare(strict_types=1);
 
 namespace Yansongda\Pay\Service;
 
-use Yansongda\Pay\Contract\ParserInterface;
-use Yansongda\Pay\Contract\ServiceProviderInterface;
-use Yansongda\Pay\Parser\CollectionParser;
+use Yansongda\Pay\Contract\ProviderInterface;
 use Yansongda\Pay\Pay;
 use Yansongda\Pay\Provider\Alipay;
 
-class AlipayServiceProvider implements ServiceProviderInterface
+class AlipayServiceProvider extends AbstractServiceProvider
 {
-    /**
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     */
-    public function register(Pay $pay, ?array $data = null): void
+    protected function makeService(): ProviderInterface
     {
-        $service = function () {
-            Pay::set(ParserInterface::class, CollectionParser::class);
+        return new Alipay();
+    }
 
-            return new Alipay();
-        };
-
-        $pay::set(Alipay::class, $service);
-        $pay::set('alipay', $service);
+    protected function getProviderName(): string
+    {
+        return Pay::PROVIDER_ALIPAY;
     }
 }

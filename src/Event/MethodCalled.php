@@ -4,26 +4,24 @@ declare(strict_types=1);
 
 namespace Yansongda\Pay\Event;
 
-use Yansongda\Pay\Rocket;
+use Yansongda\Artful\Event\Event;
+use Yansongda\Artful\Rocket;
 
 class MethodCalled extends Event
 {
-    /**
-     * @var string
-     */
-    public $provider;
+    public string $provider;
+
+    public string $name;
 
     /**
-     * @var string
+     * @var array<string, mixed>
      */
-    public $name;
+    public array $params;
 
     /**
-     * @var array
+     * @param array<string, mixed> $params
      */
-    public $params;
-
-    public function __construct(string $provider, string $name, array $params, ?Rocket $rocket)
+    public function __construct(string $provider, string $name, array $params, ?Rocket $rocket = null)
     {
         $this->provider = $provider;
         $this->name = $name;

@@ -4,16 +4,17 @@ declare(strict_types=1);
 
 namespace Yansongda\Pay\Tests\Stubs;
 
-use Yansongda\Pay\Contract\ServiceProviderInterface;
+use Yansongda\Artful\Contract\ServiceProviderInterface;
+use Yansongda\Pay\Exception\ContainerException;
 use Yansongda\Pay\Pay;
 
 class FooServiceProviderStub implements ServiceProviderInterface
 {
     /**
-     * @throws \Yansongda\Pay\Exception\ContainerException
+     * @throws ContainerException
      */
-    public function register(Pay $pay, ?array $data = null): void
+    public function register(mixed $data = null): void
     {
-        $pay::set('foo', 'bar');
+        Pay::set('foo', 'bar');
     }
 }

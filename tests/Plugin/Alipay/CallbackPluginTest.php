@@ -2,47 +2,113 @@
 
 declare(strict_types=1);
 
-namespace Yansongda\Pay\Tests\Plugin\Alipay;
-
 use GuzzleHttp\Psr7\ServerRequest;
-use Yansongda\Pay\Pay;
+use Yansongda\Artful\Direction\NoHttpRequestDirection;
+use Yansongda\Artful\Rocket;
+use Yansongda\Pay\Exception\Exception;
+use Yansongda\Pay\Exception\InvalidSignException;
 use Yansongda\Pay\Plugin\Alipay\CallbackPlugin;
-use Yansongda\Pay\Rocket;
-use Yansongda\Pay\Tests\TestCase;
 
-class CallbackPluginTest extends TestCase
-{
-    public function testReturnCallback()
-    {
-        $url = 'http://127.0.0.1:8000/alipay/verify?charset=utf-8&out_trade_no=yansongda-1622986519&method=alipay.trade.page.pay.return&total_amount=0.01&sign=oSazH3ZnzPQBGfJ8piYuri0E683D7bEKtd1NPcuYctvCEiRWP1QBVWma3hwoTLc19KdXbMGGZcOS5UvtlWwIvcK3oqkuRkFOwcRRmyF0UScmdHrTEPO9VwcaEWPK9Hy%2BTSlYrlnfCae1zlDo4vvNojFZf%2BduaaYCGS2L4Q55atloeztOPsZTNSYI7Jy0rrQcOaAWL7F9aJNqFPW6WkWL31w6HwDHcRSEQzD9C9YTsRkQ7khPHFEw8CHSYp5h8XOq%2BfE0yRDAEEw2pxYYC5QhCtbqVjLdfFXp792cTRd31IB6iAznnDvOATZVgulpC0Z6MV0k0MInL2CarbuO5SZfRg%3D%3D&trade_no=2021060622001498120501382075&auth_app_id=2016082000295641&version=1.0&app_id=2016082000295641&sign_type=RSA2&seller_id=2088102172237210&timestamp=2021-06-06+21%3A35%3A50';
-        parse_str(parse_url($url)['query'], $query);
-        $request = new ServerRequest('GET', $url);
-        $request = $request->withQueryParams($query);
+use function Yansongda\Artful\filter_params;
+use Yansongda\Pay\Tests\Support\Traits\AlipayCallbackHelpers;
 
-        $rocket = new Rocket();
-        $rocket->setParams($request->getQueryParams());
+uses(AlipayCallbackHelpers::class);
 
-        /* @var CallbackPlugin $plugin */
-        $plugin = Pay::get(CallbackPlugin::class);
-        $result = $plugin->assembly($rocket, function ($rocket) {return $rocket;});
+it('同步回调', function () {
+    $plugin = new CallbackPlugin();
+    $url = 'http://127.0.0.1:8000/alipay/verify?charset=utf-8&out_trade_no=1703141270&method=alipay.trade.page.pay.return&total_amount=0.01&sign=RJzbs5y7I41BO9UPnCdq7oWgoInyjELi9Qj6D%2BLAZXVpHTedemAHfVUowuF9iuznGZLxU6Xv1L3ZkzTGxmIfvzontCZNb0%2BRROqiT41lX91VYd6j4ZcOn8zsvlCdQSVHmYNJi%2Bw%2F40uHxo1ufRwHxBNtQKsoJCYk5VtZ92pQFvVyE5wPPT6Nolww5WlCAPxcWNby8VAiWT%2Bd2yxmFm8vZ6yj5rsLHTR72O76TkEXzOEex6e36Zf8M9YXww7RQbflMfk9eURPHW%2FoQq4hZr%2FlX7%2FO1nT5vdT4UVFai4V18Xm1KspBun8outJxqlWMIKVxGsYhIH1E79ORt4wQA7PG1g%3D%3D&trade_no=2023122122001499160501586202&auth_app_id=9021000122682882&version=1.0&app_id=9021000122682882&sign_type=RSA2&seller_id=2088721003899159&timestamp=2023-12-21+14%3A48%3A44';
+    parse_str(parse_url($url)['query'], $query);
+    $request = new ServerRequest('GET', $url);
+    $request = $request->withQueryParams($query);
 
-        self::assertNotEmpty($result->getPayload()->all());
-    }
+    $rocket = new Rocket();
+    $rocket->setParams($request->getQueryParams());
 
-    public function testReturnCallbackMultiConfig()
-    {
-        $url = 'http://127.0.0.1:8000/alipay/verify?_config=default&charset=utf-8&out_trade_no=yansongda-1622986519&method=alipay.trade.page.pay.return&total_amount=0.01&sign=oSazH3ZnzPQBGfJ8piYuri0E683D7bEKtd1NPcuYctvCEiRWP1QBVWma3hwoTLc19KdXbMGGZcOS5UvtlWwIvcK3oqkuRkFOwcRRmyF0UScmdHrTEPO9VwcaEWPK9Hy%2BTSlYrlnfCae1zlDo4vvNojFZf%2BduaaYCGS2L4Q55atloeztOPsZTNSYI7Jy0rrQcOaAWL7F9aJNqFPW6WkWL31w6HwDHcRSEQzD9C9YTsRkQ7khPHFEw8CHSYp5h8XOq%2BfE0yRDAEEw2pxYYC5QhCtbqVjLdfFXp792cTRd31IB6iAznnDvOATZVgulpC0Z6MV0k0MInL2CarbuO5SZfRg%3D%3D&trade_no=2021060622001498120501382075&auth_app_id=2016082000295641&version=1.0&app_id=2016082000295641&sign_type=RSA2&seller_id=2088102172237210&timestamp=2021-06-06+21%3A35%3A50';
-        parse_str(parse_url($url)['query'], $query);
-        $request = new ServerRequest('GET', $url);
-        $request = $request->withQueryParams($query);
+    $result = $plugin->assembly($rocket, function ($rocket) {return $rocket; });
 
-        $rocket = new Rocket();
-        $rocket->setParams($request->getQueryParams());
+    expect($result->getPayload()->all())->not->toBeEmpty();
+});
 
-        /* @var CallbackPlugin $plugin */
-        $plugin = Pay::get(CallbackPlugin::class);
-        $result = $plugin->assembly($rocket, function ($rocket) {return $rocket;});
+it('多租户同步回调', function () {
+    $plugin = new CallbackPlugin();
+    $url = 'http://127.0.0.1:8000/alipay/verify?_config=default&charset=utf-8&out_trade_no=1703141270&method=alipay.trade.page.pay.return&total_amount=0.01&sign=RJzbs5y7I41BO9UPnCdq7oWgoInyjELi9Qj6D%2BLAZXVpHTedemAHfVUowuF9iuznGZLxU6Xv1L3ZkzTGxmIfvzontCZNb0%2BRROqiT41lX91VYd6j4ZcOn8zsvlCdQSVHmYNJi%2Bw%2F40uHxo1ufRwHxBNtQKsoJCYk5VtZ92pQFvVyE5wPPT6Nolww5WlCAPxcWNby8VAiWT%2Bd2yxmFm8vZ6yj5rsLHTR72O76TkEXzOEex6e36Zf8M9YXww7RQbflMfk9eURPHW%2FoQq4hZr%2FlX7%2FO1nT5vdT4UVFai4V18Xm1KspBun8outJxqlWMIKVxGsYhIH1E79ORt4wQA7PG1g%3D%3D&trade_no=2023122122001499160501586202&auth_app_id=9021000122682882&version=1.0&app_id=9021000122682882&sign_type=RSA2&seller_id=2088721003899159&timestamp=2023-12-21+14%3A48%3A44';
+    parse_str(parse_url($url)['query'], $query);
+    $request = new ServerRequest('GET', $url);
+    $request = $request->withQueryParams($query);
 
-        self::assertNotEmpty($result->getPayload()->all());
-    }
-}
+    $rocket = new Rocket();
+    $rocket->setParams($request->getQueryParams());
+
+    $result = $plugin->assembly($rocket, function ($rocket) {return $rocket; });
+
+    expect($result->getPayload()->all())->not->toBeEmpty();
+});
+
+it('回调包含加号', function () {
+    $plugin = new CallbackPlugin();
+    $post = [
+        'gmt_create' => '2023-12-21 16:26:32',
+        'charset' => 'utf-8',
+        'gmt_payment' => '2023-12-21 16:26:43',
+        'notify_time' => '2023-12-21 16:26:45',
+        'subject' => 'yansongda+测试 - 1',
+        'sign' => 'Rs7SszD15WqbdJsGZPN+HpCBcQzBCkJx0ccNeg1rpUxyTVA1ps2vJ4sLhaa7O+lliTj6N1MSGqc8cK6JSs7nPg731RAOfneirtrqrlW2u0m15kWAKrVjgPGLUMtK/eT15e/6NcxsWra/bsZaan+nFDzO8xceOwy96W+qVUtTPfBRBp9Zjryi5oIONOifGMALD284YbNC3qq2eyqVysF+zgk+/MtuHk2Eh/fL7UbClHQXQ2hD686Dt8bR949TNMbkWCYXstmjVBO55qF8xhaoF/b5zAe5/O/13g/QlwDXBcF3XwJpbFWrBehoFFCnJhR/xXZ0E+D2Vsw1oAQ3l+R2dQ==',
+        'buyer_id' => '2088722003899169',
+        'invoice_amount' => '0.01',
+        'version' => '1.0',
+        'notify_id' => '2023122101222162644199160501632046',
+        'fund_bill_list' => '[{"amount":"0.01","fundChannel":"ALIPAYACCOUNT"}]',
+        'notify_type' => 'trade_status_sync',
+        'out_trade_no' => '1703147160',
+        'total_amount' => '0.01',
+        'trade_status' => 'TRADE_SUCCESS',
+        'trade_no' => '2023122122001499160501589436',
+        'auth_app_id' => '9021000122682882',
+        'receipt_amount' => '0.01',
+        'point_amount' => '0.00',
+        'app_id' => '9021000122682882',
+        'buyer_pay_amount' => '0.01',
+        'sign_type' => 'RSA2',
+        'seller_id' => '2088721003899159',
+    ];
+
+    $rocket = new Rocket();
+    $rocket->setParams($post);
+
+    $result = $plugin->assembly($rocket, function ($rocket) {return $rocket; });
+
+    expect($result->getPayload()->all())->not->toBeEmpty();
+});
+
+it('V3 证书租户的回调通知', function () {
+    // V3 租户（证书模式）异步通知验签：报文与 V2 同构，同一插件统一处理.
+    $plugin = new CallbackPlugin();
+    $form = $this->makeSignedForm();
+
+    $rocket = (new Rocket())->setParams(array_merge($form, ['_config' => 'alipay-v3']));
+
+    $result = $plugin->assembly($rocket, fn ($rocket) => $rocket);
+
+    expect($result->getDirection())->toBe(NoHttpRequestDirection::class);
+    expect($result->getPayload()->except('_config')->all())->toBe($form);
+});
+
+it('V3 证书租户回调参数被篡改', function () {
+    $plugin = new CallbackPlugin();
+    $form = $this->makeSignedForm();
+    $form['total_amount'] = '999.00';
+
+    $rocket = (new Rocket())->setParams(array_merge($form, ['_config' => 'alipay-v3']));
+
+    $plugin->assembly($rocket, fn ($rocket) => $rocket);
+})->throws(InvalidSignException::class, null, Exception::SIGN_ERROR);
+
+it('V3 证书租户回调缺少签名', function () {
+    $plugin = new CallbackPlugin();
+    $form = $this->makeSignedForm();
+    $form['sign'] = '';
+
+    $rocket = (new Rocket())->setParams(array_merge($form, ['_config' => 'alipay-v3']));
+
+    $plugin->assembly($rocket, fn ($rocket) => $rocket);
+})->throws(InvalidSignException::class, null, Exception::SIGN_EMPTY);

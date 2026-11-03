@@ -1,0 +1,212 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Yansongda\Pay\Traits;
+
+use Yansongda\Artful\Exception\ContainerException;
+use Yansongda\Artful\Exception\InvalidConfigException;
+use Yansongda\Artful\Exception\ServiceNotFoundException;
+use Yansongda\Artful\Rocket;
+use Yansongda\Pay\CertManager;
+use Yansongda\Pay\Config\AlipayConfig;
+use Yansongda\Pay\Exception\DecryptException;
+use Yansongda\Pay\Exception\Exception;
+use Yansongda\Pay\Exception\InvalidSignException;
+use Yansongda\Pay\Pay;
+use Yansongda\Pay\Provider\Alipay;
+use Yansongda\Supports\Collection;
+use Yansongda\Supports\Str;
+
+trait AlipayTrait
+{
+    use ProviderConfigTrait;
+
+    /**
+     * @throws InvalidConfigException 缺少支付宝公钥证书配置
+     * @throws InvalidSignException   签名为空或验签失败
+     */
+    public static function verifyAlipaySign(AlipayConfig $config, string $contents, string $sign): void
+    {
+        if ('' === $sign) {
+            throw new InvalidSignException(Exception::SIGN_EMPTY);
+        }
+
+        if (empty($config->getAlipayPublicCertPath())) {
+            throw new InvalidConfigException(Exception::CONFIG_ALIPAY_INVALID, '配置异常: 缺少支付宝配置 -- [alipay_public_cert_path]');
+        }
+
+        $publicCert = CertManager::getPublicCert($config->getAlipayPublicCertPath());
+        $publicKey = openssl_pkey_get_public($publicCert);
+
+        if (false === $publicKey || 1 !== openssl_verify($contents, base64_decode($sign), $publicKey, OPENSSL_ALGO_SHA256)) {
+            throw new InvalidSignException(Exception::SIGN_ERROR);
+        }
+    }
+
+    /**
+     * 解密支付宝接口返回的加密内容（AES-128-CBC，IV 为 16 字节全零）.
+     *
+     * @see https://github.com/alipay/alipay-sdk-php-all/blob/master/v2/aop/AopEncrypt.php 官方加解密算法
+     *
+     * @throws InvalidConfigException 未配置 [aes_key] 或密钥格式非法
+     * @throws DecryptException       密文不是合法 base64 字符串或解密失败
+     */
+    public static function decryptAlipayContents(string $contents, AlipayConfig $config): string
+    {
+        $aesKey = $config->getAesKey();
+
+        if (empty($aesKey)) {
+            throw new InvalidConfigException(Exception::DECRYPT_ALIPAY_AES_KEY_INVALID, '加密解密异常: 未配置支付宝 AES 密钥 [aes_key]');
+        }
+
+        $key = base64_decode($aesKey, true);
+
+        if (false === $key || 16 !== strlen($key)) {
+            throw new InvalidConfigException(Exception::DECRYPT_ALIPAY_AES_KEY_INVALID, '加密解密异常: 支付宝 AES 密钥格式错误，须为 base64 编码的 16 字节密钥');
+        }
+
+        $data = base64_decode($contents, true);
+
+        if (false === $data) {
+            throw new DecryptException(Exception::DECRYPT_ALIPAY_ENCRYPTED_DATA_INVALID, '加密解密异常: 支付宝密文不是合法的 base64 字符串');
+        }
+
+        $plain = openssl_decrypt($data, 'aes-128-cbc', $key, OPENSSL_RAW_DATA, str_repeat("\0", 16));
+
+        if (false === $plain) {
+            throw new DecryptException(Exception::DECRYPT_ALIPAY_ENCRYPTED_DATA_INVALID, '加密解密异常: 支付宝密文解密失败，请检查 AES 密钥是否与开放平台控制台一致（重新生成密钥后旧密钥立即失效）');
+        }
+
+        return $plain;
+    }
+
+    public static function getAlipayUrl(AlipayConfig $config, ?Collection $payload): string
+    {
+        $url = self::getRadarUrl($config, $payload);
+
+        if (is_string($url) && str_starts_with($url, 'http')) {
+            return $url;
+        }
+
+        return Alipay::URL[$config->getMode()->value].'/gateway.do?charset=utf-8';
+    }
+
+    /**
+     * @throws InvalidConfigException 缺少商户私钥配置
+     */
+    public static function getAlipayPrivateKey(AlipayConfig $config): string
+    {
+        $privateKey = $config->getAppSecretCert();
+
+        if (empty($privateKey)) {
+            throw new InvalidConfigException(Exception::CONFIG_ALIPAY_INVALID, '配置异常: 缺少支付宝配置 -- [app_secret_cert]');
+        }
+
+        return CertManager::getPrivateCert($privateKey);
+    }
+
+    /**
+     * 从应用公钥证书中提取应用公钥（剥离 PEM 头尾与换行的裸公钥串）.
+     *
+     * `openssl_pkey_get_public` 可直接接受 X.509 证书内容并提取公钥（与 `verifyAlipaySign` 用法同源）.
+     *
+     * @throws InvalidConfigException 缺少应用公钥证书配置或证书解析失败
+     */
+    public static function getAlipayAppPublicKey(AlipayConfig $config): string
+    {
+        if (empty($config->getAppPublicCertPath())) {
+            throw new InvalidConfigException(Exception::CONFIG_ALIPAY_INVALID, '配置异常: 缺少支付宝配置 -- [app_public_cert_path]');
+        }
+
+        $publicKey = openssl_pkey_get_public(CertManager::getPublicCert($config->getAppPublicCertPath()));
+
+        if (false === $publicKey) {
+            throw new InvalidConfigException(Exception::CONFIG_CERT_PARSE_FAILED, '配置异常: 应用公钥证书解析失败，请检查 [app_public_cert_path]');
+        }
+
+        $details = openssl_pkey_get_details($publicKey);
+        $pem = is_array($details) ? ($details['key'] ?? null) : null;
+
+        if (!is_string($pem)) {
+            throw new InvalidConfigException(Exception::CONFIG_CERT_PARSE_FAILED, '配置异常: 应用公钥证书解析失败，请检查 [app_public_cert_path]');
+        }
+
+        return str_replace(['-----BEGIN PUBLIC KEY-----', '-----END PUBLIC KEY-----', "\r", "\n"], '', $pem);
+    }
+
+    /**
+     * 获取支付宝 V3 请求 URL：radar 完整 URL 优先，否则网关 host（沙箱为 V3 专用网关）+ 业务 path.
+     */
+    public static function getAlipayV3Url(AlipayConfig $config, ?Collection $payload): string
+    {
+        $url = self::getRadarUrl($config, $payload);
+
+        if (is_string($url) && str_starts_with($url, 'http')) {
+            return $url;
+        }
+
+        $mode = $config->getMode();
+
+        $base = $mode->isSandbox() ? Alipay::V3_SANDBOX_URL : Alipay::URL[$mode->value];
+
+        return $base.($url ?? '');
+    }
+
+    /**
+     * 生成支付宝 V3 请求 `Authorization` header 值.
+     *
+     * 待签名组串共 5 行：authString、httpMethod、requestUri（path+query，不含 host）、
+     * requestBody（空 body 保留空行）、appAuthToken（缺省时整行缺省）.
+     *
+     * @see https://opendocs.alipay.com/open-v3/05419m 支付宝支付签名生成算法
+     *
+     * @throws InvalidConfigException 缺少商户私钥/应用公钥证书配置或证书解析失败
+     */
+    public static function getAlipayV3Authorization(AlipayConfig $config, string $httpMethod, string $httpRequestUri, string $httpRequestBody = '', ?string $appAuthToken = null): string
+    {
+        $authString = 'app_id='.$config->getAppId();
+
+        if (empty($appPublicCertPath = $config->getAppPublicCertPath())) {
+            throw new InvalidConfigException(Exception::CONFIG_ALIPAY_INVALID, '配置异常: 缺少支付宝配置 -- [app_public_cert_path]');
+        }
+
+        $authString .= ',app_cert_sn='.CertManager::alipayGetAppCertSn($appPublicCertPath);
+
+        // 毫秒时间戳（对齐官方 `getCurrentMilis()` 手法）+ 请求唯一 ID（UUID v4）
+        $timeInfo = explode(' ', microtime());
+        $authString .= ',nonce='.Str::uuidV4().',timestamp='.sprintf('%d%03d', (int) $timeInfo[1], (int) ((float) $timeInfo[0] * 1000));
+
+        $content = $authString."\n"
+            .$httpMethod."\n"
+            .$httpRequestUri."\n"
+            .('' !== $httpRequestBody ? $httpRequestBody : '')."\n"
+            .(null !== $appAuthToken && '' !== $appAuthToken ? $appAuthToken."\n" : '');
+
+        openssl_sign($content, $sign, self::getAlipayPrivateKey($config), OPENSSL_ALGO_SHA256);
+
+        return 'ALIPAY-SHA256withRSA '.$authString.',sign='.base64_encode($sign);
+    }
+
+    /**
+     * @throws ContainerException
+     * @throws ServiceNotFoundException
+     */
+    protected function loadAlipayServiceProvider(Rocket $rocket): void
+    {
+        $params = $rocket->getParams();
+
+        /** @var AlipayConfig $config */
+        $config = self::getProviderConfig(Pay::PROVIDER_ALIPAY, $params);
+        $serviceProviderId = $config->getServiceProviderId();
+
+        if (!$config->getMode()->isService()
+            || empty($serviceProviderId)) {
+            return;
+        }
+
+        $rocket->mergeParams([
+            'extend_params' => array_merge($params['extend_params'] ?? [], ['sys_service_provider_id' => $serviceProviderId]),
+        ]);
+    }
+}

@@ -1,0 +1,121 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Yansongda\Pay\Shortcut\Unipay;
+
+use Yansongda\Artful\Contract\ShortcutInterface;
+use Yansongda\Artful\Exception\InvalidParamsException;
+use Yansongda\Artful\Plugin\AddPayloadBodyPlugin;
+use Yansongda\Artful\Plugin\ParserPlugin;
+use Yansongda\Pay\Action\UnipayAction;
+use Yansongda\Pay\Exception\Exception;
+use Yansongda\Pay\Plugin\Unipay\AddRadarPlugin;
+use Yansongda\Pay\Plugin\Unipay\Open\AddPayloadSignaturePlugin;
+use Yansongda\Pay\Plugin\Unipay\Open\Pay\QrCode\QueryPlugin as QrCodeQueryPlugin;
+use Yansongda\Pay\Plugin\Unipay\Open\Pay\Web\QueryPlugin as WebQueryPlugin;
+use Yansongda\Pay\Plugin\Unipay\Open\StartPlugin;
+use Yansongda\Pay\Plugin\Unipay\Open\VerifySignaturePlugin;
+use Yansongda\Pay\Plugin\Unipay\Qra\AddPayloadSignaturePlugin as QraAddPayloadSignaturePlugin;
+use Yansongda\Pay\Plugin\Unipay\Qra\Pos\QueryPlugin as QraPosQueryPlugin;
+use Yansongda\Pay\Plugin\Unipay\Qra\Pos\QueryRefundPlugin as QraPosQueryRefundPlugin;
+use Yansongda\Pay\Plugin\Unipay\Qra\StartPlugin as QraStartPlugin;
+use Yansongda\Pay\Plugin\Unipay\Qra\VerifySignaturePlugin as QraVerifySignaturePlugin;
+
+class QueryShortcut implements ShortcutInterface
+{
+    /**
+     * @param array<string, mixed> $params
+     *
+     * @return array<class-string>
+     *
+     * @throws InvalidParamsException
+     */
+    public function getPlugins(array $params): array
+    {
+        $action = $params['_action'] ?? UnipayAction::QUERY_DEFAULT;
+
+        return match ($action) {
+            UnipayAction::QUERY_DEFAULT, UnipayAction::QUERY_WEB => $this->webPlugins(),
+            UnipayAction::QUERY_QR_CODE => $this->qrCodePlugins(),
+            UnipayAction::QUERY_QRA_POS => $this->qraPosPlugins(),
+            UnipayAction::QUERY_QRA_POS_REFUND => $this->qraPosRefundPlugins(),
+            default => throw new InvalidParamsException(
+                Exception::PARAMS_SHORTCUT_ACTION_INVALID,
+                '不支持的 _action ['.($params['_action'] ?? '').']',
+            ),
+        };
+    }
+
+    /**
+     * @return array<class-string>
+     */
+    protected function defaultPlugins(): array
+    {
+        return $this->webPlugins();
+    }
+
+    /**
+     * @return array<class-string>
+     */
+    protected function webPlugins(): array
+    {
+        return [
+            StartPlugin::class,
+            WebQueryPlugin::class,
+            AddPayloadSignaturePlugin::class,
+            AddPayloadBodyPlugin::class,
+            AddRadarPlugin::class,
+            VerifySignaturePlugin::class,
+            ParserPlugin::class,
+        ];
+    }
+
+    /**
+     * @return array<class-string>
+     */
+    protected function qrCodePlugins(): array
+    {
+        return [
+            StartPlugin::class,
+            QrCodeQueryPlugin::class,
+            AddPayloadSignaturePlugin::class,
+            AddPayloadBodyPlugin::class,
+            AddRadarPlugin::class,
+            VerifySignaturePlugin::class,
+            ParserPlugin::class,
+        ];
+    }
+
+    /**
+     * @return array<class-string>
+     */
+    protected function qraPosPlugins(): array
+    {
+        return [
+            QraStartPlugin::class,
+            QraPosQueryPlugin::class,
+            QraAddPayloadSignaturePlugin::class,
+            AddPayloadBodyPlugin::class,
+            AddRadarPlugin::class,
+            QraVerifySignaturePlugin::class,
+            ParserPlugin::class,
+        ];
+    }
+
+    /**
+     * @return array<class-string>
+     */
+    protected function qraPosRefundPlugins(): array
+    {
+        return [
+            QraStartPlugin::class,
+            QraPosQueryRefundPlugin::class,
+            QraAddPayloadSignaturePlugin::class,
+            AddPayloadBodyPlugin::class,
+            AddRadarPlugin::class,
+            QraVerifySignaturePlugin::class,
+            ParserPlugin::class,
+        ];
+    }
+}

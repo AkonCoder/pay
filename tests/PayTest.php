@@ -1,163 +1,191 @@
 <?php
 
-namespace Yansongda\Pay\Tests;
+declare(strict_types=1);
 
-use DI\Container;
-use GuzzleHttp\Client;
-use Psr\Container\ContainerInterface;
-use Symfony\Component\EventDispatcher\EventDispatcher;
-use Yansongda\Pay\Contract\ConfigInterface;
-use Yansongda\Pay\Contract\EventDispatcherInterface;
-use Yansongda\Pay\Contract\HttpClientInterface;
-use Yansongda\Pay\Contract\LoggerInterface;
-use Yansongda\Pay\Exception\ContainerException;
-use Yansongda\Pay\Exception\ServiceNotFoundException;
+use Hyperf\Pimple\ContainerFactory;
+use Yansongda\Artful\Artful;
+use Yansongda\Artful\Contract\ConfigInterface;
+use Yansongda\Artful\Exception\ServiceNotFoundException;
+use Yansongda\Pay\CertManager;
+use Yansongda\Pay\Config\WechatConfig;
 use Yansongda\Pay\Pay;
-use Yansongda\Pay\Tests\Stubs\FooServiceProviderStub;
-use Yansongda\Supports\Config;
-use Yansongda\Supports\Logger;
-use Yansongda\Supports\Pipeline;
+use Yansongda\Pay\Provider\Airwallex;
+use Yansongda\Pay\Provider\Alipay;
+use Yansongda\Pay\Provider\Jsb;
+use Yansongda\Pay\Provider\Unipay;
+use Yansongda\Pay\Provider\Wechat;
 
-class PayTest extends TestCase
-{
-    protected function setUp(): void
-    {
+beforeEach(function () {
+    Pay::clear();
+});
+
+afterEach(function () {
+    Pay::clear();
+});
+
+it('配置', function () {
+    $result = Pay::config(['name' => 'yansongda']);
+    expect($result)->toBeTrue();
+    expect(Pay::get(ConfigInterface::class)->get('name'))->toEqual('yansongda');
+    expect(Pay::get('alipay'))->toBeInstanceOf(Alipay::class);
+    expect(Pay::get(Alipay::class))->toBeInstanceOf(Alipay::class);
+    expect(Pay::get('wechat'))->toBeInstanceOf(Wechat::class);
+    expect(Pay::get(Wechat::class))->toBeInstanceOf(Wechat::class);
+    expect(Pay::get('unipay'))->toBeInstanceOf(Unipay::class);
+    expect(Pay::get(Unipay::class))->toBeInstanceOf(Unipay::class);
+    expect(Pay::get('jsb'))->toBeInstanceOf(Jsb::class);
+    expect(Pay::get(Jsb::class))->toBeInstanceOf(Jsb::class);
+
+    // Task 2: without force, calling config() again returns false and does not mutate
+    $result1 = Pay::config(['name' => 'yansongda1']);
+    expect($result1)->toBeFalse();
+    expect(Pay::get(ConfigInterface::class)->get('name'))->toEqual('yansongda');
+});
+
+it('容器已存在且未强制时返回 false', function () {
+    Pay::config([
+        'wechat' => [
+            'default' => [
+                'mch_id' => '1600314069',
+                'mch_secret_key' => '53D67FCB97E68F9998CBD17ED7A8D1E2',
+                'mch_secret_cert' => cert_path('wechatAppPrivateKey.pem'),
+                'mch_public_cert_path' => cert_path('wechatAppPublicKey.pem'),
+                'notify_url' => 'https://pay.yansongda.cn/original',
+                'mp_app_id' => 'wx-original',
+            ],
+        ],
+    ]);
+
+    // Task 2: Without force, config() returns false and does not mutate runtime config
+    $result = Pay::config([
+        'wechat' => [
+            'default' => [
+                'mp_app_id' => 'wx-updated',
+            ],
+        ],
+    ]);
+
+    $wechatConfig = Pay::get(ConfigInterface::class)->get('wechat.default');
+
+    expect($result)->toBeFalse();
+    expect($wechatConfig)->toBeInstanceOf(WechatConfig::class);
+    expect($wechatConfig->getMpAppId())->toBe('wx-original');
+    expect($wechatConfig->getMchId())->toBe('1600314069');
+    expect($wechatConfig->getNotifyUrl())->toBe('https://pay.yansongda.cn/original');
+});
+
+it('强制替换运行时配置', function () {
+    Pay::config([
+        'wechat' => [
+            'default' => [
+                'mch_id' => '1600314069',
+                'mch_secret_key' => '53D67FCB97E68F9998CBD17ED7A8D1E2',
+                'mch_secret_cert' => cert_path('wechatAppPrivateKey.pem'),
+                'mch_public_cert_path' => cert_path('wechatAppPublicKey.pem'),
+                'notify_url' => 'https://pay.yansongda.cn/original',
+                'mp_app_id' => 'wx-original',
+            ],
+        ],
+    ]);
+
+    // Task 2: With force, config() replaces runtime config based only on new payload
+    $result = Pay::config([
+        '_force' => true,
+        'wechat' => [
+            'default' => [
+                'mp_app_id' => 'wx-updated',
+                'mch_id' => '1600314069',
+                'mch_secret_key' => '53D67FCB97E68F9998CBD17ED7A8D1E2',
+                'mch_secret_cert' => cert_path('wechatAppPrivateKey.pem'),
+                'mch_public_cert_path' => cert_path('wechatAppPublicKey.pem'),
+            ],
+        ],
+    ]);
+
+    $wechatConfig = Pay::get(ConfigInterface::class)->get('wechat.default');
+
+    expect($result)->toBeTrue();
+    expect($wechatConfig)->toBeInstanceOf(WechatConfig::class);
+    expect($wechatConfig->getMpAppId())->toBe('wx-updated');
+    // notify_url was not in the new payload, so it's empty string (default) not preserved from old
+    expect($wechatConfig->getNotifyUrl())->toBe('');
+});
+
+it('直接调用静态方法', function () {
+    Pay::config();
+    $pay = Pay::alipay();
+    expect($pay)->toBeInstanceOf(Alipay::class);
+
+    $airwallex = Pay::airwallex([['airwallex' => ['default' => ['client_id' => 'foo', 'api_key' => 'bar']]]]);
+    expect($airwallex)->toBeInstanceOf(Airwallex::class);
+
+    if (class_exists(ContainerFactory::class)) {
         Pay::clear();
+        $container3 = (new ContainerFactory())();
+        $pay = Pay::alipay([], $container3);
+
+        expect(Artful::getContainer())->toBe($container3);
+        expect($pay)->toBeInstanceOf(Alipay::class);
     }
+});
 
-    protected function tearDown(): void
-    {
-        Pay::clear();
-    }
+it('设置与获取', function () {
+    Pay::config(['name' => 'yansongda']);
 
-    public function testConfig()
-    {
-        $result = Pay::config(['name' => 'yansongda']);
-        self::assertInstanceOf(Pay::class, $result);
-        self::assertEquals('yansongda', Pay::get(ConfigInterface::class)->get('name'));
+    Pay::set('age', 28);
 
-        // force
-        $result1 = Pay::config(['name' => 'yansongda1', '_force' => true]);
-        self::assertInstanceOf(Pay::class, $result1);
-        self::assertEquals('yansongda1', Pay::get(ConfigInterface::class)->get('name'));
-    }
+    expect(Pay::get('age'))->toEqual(28);
+});
 
-    public function testSetAndGet()
-    {
-        Pay::config(['name' => 'yansongda']);
+it('魔术调用找不到服务', function () {
 
-        Pay::set('age', 28);
+    Pay::foo1([]);
+})->throws(ServiceNotFoundException::class);
 
-        self::assertEquals(28, Pay::get('age'));
-    }
+it('运行时配置存储类型化对象', function () {
+    Pay::config([
+        'wechat' => [
+            'default' => [
+                'mch_id' => '1600314069',
+                'mch_secret_key' => '53D67FCB97E68F9998CBD17ED7A8D1E2',
+                'mch_secret_cert' => cert_path('wechatAppPrivateKey.pem'),
+                'mch_public_cert_path' => cert_path('wechatAppPublicKey.pem'),
+                'notify_url' => 'https://pay.yansongda.cn/notify',
+                'mp_app_id' => 'wx-test',
+            ],
+        ],
+        'logger' => [
+            'enable' => false,
+            'file' => './logs/wechat.log',
+            'level' => 'info',
+        ],
+        'http' => [
+            'timeout' => 5.0,
+            'connect_timeout' => 5.0,
+        ],
+    ]);
 
-    public function testHas()
-    {
-        Pay::config(['name' => 'yansongda']);
+    // Task 1 + Task 2: Provider tenant nodes are typed config objects accessible via ConfigInterface
+    $wechatConfig = Pay::get(ConfigInterface::class)->get('wechat.default');
+    expect($wechatConfig)->toBeInstanceOf(WechatConfig::class);
+    expect($wechatConfig->getMpAppId())->toBe('wx-test');
 
-        Pay::set('age', 28);
+    // Shared runtime config should remain as plain arrays
+    $loggerConfig = Pay::get(ConfigInterface::class)->get('logger');
+    $httpConfig = Pay::get(ConfigInterface::class)->get('http');
 
-        self::assertFalse(Pay::has('name'));
-        self::assertTrue(Pay::has('age'));
-    }
+    expect($loggerConfig)->toBeArray();
+    expect($httpConfig)->toBeArray();
+    expect($loggerConfig['file'])->toBe('./logs/wechat.log');
+    expect($httpConfig['timeout'])->toBe(5.0);
+});
 
-    public function testGetContainerAndClear()
-    {
-        Pay::config(['name' => 'yansongda']);
-        self::assertInstanceOf(ContainerInterface::class, Pay::getContainer());
+it('clear 清理证书管理器缓存', function () {
+    CertManager::wechatSetCertBySerial('test', 'serial123', 'cert-content');
+    expect(CertManager::wechatGetCertBySerial('test', 'serial123'))->not->toBeNull();
 
-        Pay::clear();
+    Pay::clear();
 
-        $this->expectException(ContainerException::class);
-        $this->expectExceptionCode(ContainerException::CONTAINER_NOT_FOUND);
-        $this->expectExceptionMessage('You should init/config PAY first');
+    expect(CertManager::wechatGetCertBySerial('test', 'serial123'))->toBeNull();
+});
 
-        Pay::getContainer();
-    }
-
-    public function testMakeService()
-    {
-        Pay::config(['name' => 'yansongda']);
-        self::assertNotSame(Pay::make(Pipeline::class), Pay::make(Pipeline::class));
-    }
-
-    public function testRegisterService()
-    {
-        Pay::config(['name' => 'yansongda']);
-
-        Pay::registerService(FooServiceProviderStub::class, []);
-
-        self::assertEquals('bar', Pay::get('foo'));
-    }
-
-    public function testMagicCallNotFoundService()
-    {
-        $this->expectException(ServiceNotFoundException::class);
-
-        Pay::foo([]);
-    }
-
-    public function testCoreService()
-    {
-        Pay::config(['name' => 'yansongda']);
-
-        self::assertInstanceOf(Container::class, Pay::get(\Yansongda\Pay\Contract\ContainerInterface::class));
-        self::assertInstanceOf(Container::class, Pay::get(ContainerInterface::class));
-        self::assertInstanceOf(Pay::class, Pay::get(Pay::class));
-    }
-
-    public function testCoreServiceConfig()
-    {
-        $config = ['name' => 'yansongda'];
-        Pay::config($config);
-
-        self::assertInstanceOf(Config::class, Pay::get(ConfigInterface::class));
-        self::assertInstanceOf(Config::class, Pay::get('config'));
-        self::assertEquals($config['name'], Pay::get(ConfigInterface::class)->get('name'));
-
-        // 修改 config 的情况
-        $config2 = [
-            'name' => 'yansongda2',
-        ];
-        Pay::set(ConfigInterface::class, new Config($config2));
-
-        self::assertEquals($config2['name'], Pay::get(ConfigInterface::class)->get('name'));
-    }
-
-    public function testCoreServiceLogger()
-    {
-        $config = ['name' => 'yansongda','logger' => ['enable' => true]];
-        Pay::config($config);
-
-        self::assertInstanceOf(Logger::class, Pay::get(LoggerInterface::class));
-
-        $otherLogger = new \Monolog\Logger('test');
-        Pay::set(LoggerInterface::class, $otherLogger);
-        self::assertEquals($otherLogger, Pay::get(LoggerInterface::class));
-    }
-
-    public function testCoreServiceEvent()
-    {
-        $config = ['name' => 'yansongda'];
-        Pay::config($config);
-
-        self::assertInstanceOf(EventDispatcher::class, Pay::get(EventDispatcherInterface::class));
-    }
-
-    public function testCoreServiceHttpClient()
-    {
-        $config = ['name' => 'yansongda'];
-        Pay::config($config);
-
-        self::assertInstanceOf(Client::class, Pay::get(HttpClientInterface::class));
-
-        // 使用外部 http client
-        $oldClient = Pay::get(HttpClientInterface::class);
-
-        $client = new Client(['timeout' => 3.0]);
-        Pay::set(HttpClientInterface::class, $client);
-
-        self::assertEquals($client, Pay::get(HttpClientInterface::class));
-        self::assertNotEquals($oldClient, Pay::get(HttpClientInterface::class));
-    }
-}

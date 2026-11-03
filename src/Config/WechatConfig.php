@@ -1,0 +1,297 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Yansongda\Pay\Config;
+
+use Yansongda\Artful\Exception\InvalidConfigException;
+use Yansongda\Pay\CertManager;
+use Yansongda\Pay\Enum\Wechat\AppType;
+use Yansongda\Pay\Exception\Exception;
+use Yansongda\Pay\Provider\Wechat;
+
+class WechatConfig extends AbstractConfig
+{
+    private string $mchId = '';
+    private string $mchSecretKey = '';
+    private string $mchSecretCert = '';
+    private string $mchPublicCertPath = '';
+    private string $notifyUrl = '';
+    private ?string $mchSecretKeyV2 = null;
+    private ?string $mpAppId = null;
+    private ?string $miniAppId = null;
+    private ?string $mpAppSecret = null;
+    private ?string $miniAppSecret = null;
+    private ?string $appId = null;
+    private ?string $serviceId = null;
+    private ?string $subMchId = null;
+    private ?string $subMpAppId = null;
+    private ?string $subMiniAppId = null;
+    private ?string $subAppId = null;
+    private WechatConfigVirtualPay $virtualPay;
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    public function __construct(array $values, string $tenant = 'default')
+    {
+        $this->virtualPay = new WechatConfigVirtualPay();
+        parent::__construct($values, $tenant);
+    }
+
+    public function setMchId(string $value): void
+    {
+        $this->mchId = $value;
+    }
+
+    public function setMchSecretKey(string $value): void
+    {
+        $this->mchSecretKey = $value;
+    }
+
+    public function setMchSecretCert(string $value): void
+    {
+        $this->mchSecretCert = $value;
+    }
+
+    public function setMchPublicCertPath(string $value): void
+    {
+        $this->mchPublicCertPath = $value;
+    }
+
+    public function setNotifyUrl(string $value): void
+    {
+        $this->notifyUrl = $value;
+    }
+
+    public function setMchSecretKeyV2(?string $value): void
+    {
+        $this->mchSecretKeyV2 = $value;
+    }
+
+    public function setMpAppId(?string $value): void
+    {
+        $this->mpAppId = $value;
+    }
+
+    public function setMiniAppId(?string $value): void
+    {
+        $this->miniAppId = $value;
+    }
+
+    public function setMpAppSecret(?string $value): void
+    {
+        $this->mpAppSecret = $value;
+    }
+
+    public function setMiniAppSecret(?string $value): void
+    {
+        $this->miniAppSecret = $value;
+    }
+
+    public function setAppId(?string $value): void
+    {
+        $this->appId = $value;
+    }
+
+    public function setServiceId(?string $value): void
+    {
+        $this->serviceId = $value;
+    }
+
+    public function setSubMchId(?string $value): void
+    {
+        $this->subMchId = $value;
+    }
+
+    public function setSubMpAppId(?string $value): void
+    {
+        $this->subMpAppId = $value;
+    }
+
+    public function setSubMiniAppId(?string $value): void
+    {
+        $this->subMiniAppId = $value;
+    }
+
+    public function setSubAppId(?string $value): void
+    {
+        $this->subAppId = $value;
+    }
+
+    /**
+     * @param array<string, string> $value
+     */
+    public function setWechatPublicCertPath(array $value): void
+    {
+        foreach ($value as $serialNo => $cert) {
+            CertManager::wechatSetCertBySerial($this->tenant, $serialNo, $cert);
+        }
+    }
+
+    public function getMchId(): string
+    {
+        return $this->mchId;
+    }
+
+    public function getMchSecretKey(): string
+    {
+        return $this->mchSecretKey;
+    }
+
+    public function getMchSecretCert(): string
+    {
+        return $this->mchSecretCert;
+    }
+
+    public function getMchPublicCertPath(): string
+    {
+        return $this->mchPublicCertPath;
+    }
+
+    public function getNotifyUrl(): string
+    {
+        return $this->notifyUrl;
+    }
+
+    public function getMchSecretKeyV2(): ?string
+    {
+        return $this->mchSecretKeyV2;
+    }
+
+    public function getMpAppId(): ?string
+    {
+        return $this->mpAppId;
+    }
+
+    public function getMiniAppId(): ?string
+    {
+        return $this->miniAppId;
+    }
+
+    public function getMpAppSecret(): ?string
+    {
+        return $this->mpAppSecret;
+    }
+
+    public function getMiniAppSecret(): ?string
+    {
+        return $this->miniAppSecret;
+    }
+
+    public function getAppId(): ?string
+    {
+        return $this->appId;
+    }
+
+    public function getServiceId(): ?string
+    {
+        return $this->serviceId;
+    }
+
+    public function getSubMchId(): ?string
+    {
+        return $this->subMchId;
+    }
+
+    public function getSubMpAppId(): ?string
+    {
+        return $this->subMpAppId;
+    }
+
+    public function getSubMiniAppId(): ?string
+    {
+        return $this->subMiniAppId;
+    }
+
+    public function getSubAppId(): ?string
+    {
+        return $this->subAppId;
+    }
+
+    /**
+     * @param array<string, mixed>|WechatConfigVirtualPay $value
+     */
+    public function setVirtualPay(array|WechatConfigVirtualPay $value): void
+    {
+        $this->virtualPay = is_array($value)
+            ? (new WechatConfigVirtualPay())->unserializeArray($value)
+            : $value;
+    }
+
+    public function getVirtualPay(): WechatConfigVirtualPay
+    {
+        return $this->virtualPay;
+    }
+
+    /**
+     * 根据微信支付类型获取对应的 AppId.
+     *
+     * @param AppType|string $type 支付类型: MP(公众号, 默认), MINI(小程序), APP(APP)；未知值按 MP 处理（历史行为）
+     */
+    public function getAppIdByType(AppType|string $type = AppType::MP): ?string
+    {
+        return match (AppType::fromLoose($type)) {
+            AppType::MINI => $this->miniAppId,
+            AppType::APP => $this->appId,
+            AppType::MP => $this->mpAppId,
+        };
+    }
+
+    /**
+     * 根据微信支付类型获取对应的子商户 AppId（服务商模式）.
+     *
+     * @param AppType|string $type 支付类型: MP(公众号, 默认), MINI(小程序), APP(APP)；未知值按 MP 处理（历史行为）
+     */
+    public function getSubAppIdByType(AppType|string $type = AppType::MP): ?string
+    {
+        return match (AppType::fromLoose($type)) {
+            AppType::MINI => $this->subMiniAppId,
+            AppType::APP => $this->subAppId,
+            AppType::MP => $this->subMpAppId,
+        };
+    }
+
+    /**
+     * @throws InvalidConfigException 缺少必要配置参数
+     */
+    protected function validateRequired(): void
+    {
+        // 已声明虚拟支付意图（virtual_pay.app_key + app_secret）且未配置任何微信支付商户凭据时，
+        // 跳过微信支付配置校验（仅有虚拟商品的小程序无法开通微信支付，拿不到这组凭据）
+        if ($this->virtualPay->isConfigured() && !$this->hasAnyWechatPayCredential()) {
+            return;
+        }
+
+        $this->validateNotEmpty(
+            ['mchId', 'mchSecretKey', 'mchSecretCert', 'mchPublicCertPath'],
+            Exception::CONFIG_WECHAT_INVALID,
+            '配置异常: 缺少微信配置'
+        );
+
+        if (Wechat::MCH_SECRET_KEY_LENGTH_BYTE !== strlen($this->mchSecretKey)) {
+            throw new InvalidConfigException(
+                Exception::CONFIG_WECHAT_INVALID,
+                '配置异常: mch_secret_key 长度应为 32 字节'
+            );
+        }
+
+        if ($this->getMode()->isService() && empty($this->subMchId)) {
+            throw new InvalidConfigException(
+                Exception::CONFIG_WECHAT_INVALID,
+                '配置异常: 服务商模式下缺少 [sub_mch_id]'
+            );
+        }
+    }
+
+    /**
+     * 微信支付商户凭据是否配置了至少一项——任一非空即视为已配置，避免漏配被静默放行.
+     */
+    private function hasAnyWechatPayCredential(): bool
+    {
+        return !empty($this->getMchId())
+            || !empty($this->getMchSecretKey())
+            || !empty($this->getMchSecretCert())
+            || !empty($this->getMchPublicCertPath());
+    }
+}

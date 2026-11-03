@@ -6,160 +6,193 @@ namespace Yansongda\Pay\Provider;
 
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\ServerRequest;
+use Psr\Http\Message\MessageInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Yansongda\Artful\Artful;
+use Yansongda\Artful\Exception\ContainerException;
+use Yansongda\Artful\Exception\InvalidParamsException;
+use Yansongda\Artful\Exception\ServiceNotFoundException;
+use Yansongda\Artful\Rocket;
+use Yansongda\Pay\Action\WechatAction;
+use Yansongda\Pay\Contract\ProviderInterface;
+use Yansongda\Pay\Enum\PayMode;
 use Yansongda\Pay\Event;
-use Yansongda\Pay\Exception\Exception;
-use Yansongda\Pay\Exception\InvalidParamsException;
+use Yansongda\Pay\Event\CallbackReceived;
+use Yansongda\Pay\Event\MethodCalled;
 use Yansongda\Pay\Pay;
-use Yansongda\Pay\Plugin\ParserPlugin;
-use Yansongda\Pay\Plugin\Wechat\CallbackPlugin;
-use Yansongda\Pay\Plugin\Wechat\LaunchPlugin;
-use Yansongda\Pay\Plugin\Wechat\PreparePlugin;
-use Yansongda\Pay\Plugin\Wechat\SignPlugin;
+use Yansongda\Pay\Plugin\Wechat\V3\CallbackPlugin;
+use Yansongda\Pay\Plugin\Wechat\Virtual\CallbackPlugin as VirtualCallbackPlugin;
+use Yansongda\Pay\Shortcut\Wechat\PayScoreShortcut;
 use Yansongda\Supports\Collection;
 use Yansongda\Supports\Str;
 
 /**
- * @method ResponseInterface app(array $order)  APP 支付
- * @method Collection        mini(array $order) 小程序支付
- * @method Collection        mp(array $order)   公众号支付
- * @method Collection        scan(array $order) 扫码支付
- * @method ResponseInterface wap(array $order)  H5 支付
+ * @method Collection|Rocket app(array<string, mixed> $order)      APP 支付
+ * @method Collection|Rocket mini(array<string, mixed> $order)     小程序支付
+ * @method Collection|Rocket mp(array<string, mixed> $order)       公众号支付
+ * @method Collection|Rocket scan(array<string, mixed> $order)     扫码支付（摄像头，主动扫）
+ * @method Collection|Rocket h5(array<string, mixed> $order)       H5 支付
+ * @method Collection|Rocket transfer(array<string, mixed> $order) 帐户转账
+ * @method Collection|Rocket virtual(array<string, mixed> $order)  虚拟支付
+ * @method Collection|Rocket oauth(array<string, mixed> $order)    OAuth 用户身份
+ * @method Collection|Rocket papay(array<string, mixed> $order)    委托代扣（签约/支付中签约/代扣）
+ * @method Collection|Rocket pos(array<string, mixed> $order)      刷卡支付（付款码）
+ * @method Collection|Rocket redpack(array<string, mixed> $order)  现金红包
+ * @method Collection|Rocket payscore(array<string, mixed> $order) 支付分（服务订单/商户预授权）
  */
-class Wechat extends AbstractProvider
+class Wechat implements ProviderInterface
 {
     public const AUTH_TAG_LENGTH_BYTE = 16;
 
     public const MCH_SECRET_KEY_LENGTH_BYTE = 32;
 
     public const URL = [
-        Pay::MODE_NORMAL => 'https://api.mch.weixin.qq.com/',
-        Pay::MODE_SANDBOX => 'https://api.mch.weixin.qq.com/sandboxnew/',
-        Pay::MODE_SERVICE => 'https://api.mch.weixin.qq.com/',
+        PayMode::NORMAL->value => 'https://api.mch.weixin.qq.com',
+        PayMode::SANDBOX->value => 'https://api.mch.weixin.qq.com/sandboxnew',
+        PayMode::SERVICE->value => 'https://api.mch.weixin.qq.com',
     ];
 
-    /**
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\InvalidParamsException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     *
-     * @return \Psr\Http\Message\MessageInterface|\Yansongda\Supports\Collection|array|null
-     */
-    public function __call(string $shortcut, array $params)
-    {
-        $plugin = '\\Yansongda\\Pay\\Plugin\\Wechat\\Shortcut\\'.
-            Str::studly($shortcut).'Shortcut';
+    public const URL_OPENAPI = 'https://api.weixin.qq.com';
 
-        return $this->call($plugin, ...$params);
+    /**
+     * @param array<int, mixed> $params
+     *
+     * @throws ContainerException
+     * @throws InvalidParamsException
+     * @throws ServiceNotFoundException
+     */
+    public function __call(string $shortcut, array $params): Collection|MessageInterface|Rocket|null
+    {
+        $plugin = '\Yansongda\Pay\Shortcut\Wechat\\'.Str::studly($shortcut).'Shortcut';
+
+        return Artful::shortcut($plugin, ...$params);
     }
 
     /**
-     * @param array|string $order
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\InvalidParamsException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     *
-     * @return array|\Yansongda\Supports\Collection
+     * @throws ContainerException
+     * @throws InvalidParamsException
      */
-    public function find($order)
+    public function pay(array $plugins, array $params): Collection|MessageInterface|Rocket|null
     {
-        $order = is_array($order) ? $order : ['transaction_id' => $order];
+        return Artful::artful($plugins, $params);
+    }
 
-        Event::dispatch(new Event\MethodCalled('wechat', __METHOD__, $order, null));
+    /**
+     * @throws ContainerException
+     * @throws InvalidParamsException
+     * @throws ServiceNotFoundException
+     */
+    public function query(array $order): Collection|Rocket
+    {
+        Event::dispatch(new MethodCalled(Pay::PROVIDER_WECHAT, __METHOD__, $order, null));
 
         return $this->__call('query', [$order]);
     }
 
     /**
-     * @param array|string $order
-     *
-     * @throws \Yansongda\Pay\Exception\InvalidParamsException
+     * @throws ContainerException
+     * @throws InvalidParamsException
+     * @throws ServiceNotFoundException
      */
-    public function cancel($order): void
+    public function cancel(array $order): Collection|Rocket
     {
-        throw new InvalidParamsException(Exception::METHOD_NOT_SUPPORTED, 'Wechat does not support cancel api');
+        Event::dispatch(new MethodCalled(Pay::PROVIDER_WECHAT, __METHOD__, $order, null));
+
+        return $this->__call('cancel', [$order]);
     }
 
     /**
-     * @param array|string $order
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\InvalidParamsException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
+     * @throws ContainerException
+     * @throws InvalidParamsException
+     * @throws ServiceNotFoundException
      */
-    public function close($order): void
+    public function close(array $order): Collection|Rocket
     {
-        $order = is_array($order) ? $order : ['out_trade_no' => $order];
-
-        Event::dispatch(new Event\MethodCalled('wechat', __METHOD__, $order, null));
+        Event::dispatch(new MethodCalled(Pay::PROVIDER_WECHAT, __METHOD__, $order, null));
 
         $this->__call('close', [$order]);
+
+        return new Collection();
     }
 
     /**
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\InvalidParamsException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     *
-     * @return array|\Yansongda\Supports\Collection
+     * @throws ContainerException
+     * @throws InvalidParamsException
+     * @throws ServiceNotFoundException
      */
-    public function refund(array $order)
+    public function refund(array $order): Collection|Rocket
     {
-        Event::dispatch(new Event\MethodCalled('wechat', __METHOD__, $order, null));
+        Event::dispatch(new MethodCalled(Pay::PROVIDER_WECHAT, __METHOD__, $order, null));
 
         return $this->__call('refund', [$order]);
     }
 
     /**
-     * @param array|\Psr\Http\Message\ServerRequestInterface|null $contents
+     * @param array<string, mixed> $order
      *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\InvalidParamsException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
+     * @throws ContainerException
+     * @throws InvalidParamsException
+     * @throws ServiceNotFoundException
      */
-    public function callback($contents = null, ?array $params = null): Collection
+    public function payscore(array $order): Collection|Rocket
     {
-        Event::dispatch(new Event\CallbackReceived('wechat', $contents, $params, null));
+        Event::dispatch(new MethodCalled(Pay::PROVIDER_WECHAT, __METHOD__, $order, null));
 
+        return Artful::shortcut(PayScoreShortcut::class, $order);
+    }
+
+    /**
+     * @throws ContainerException
+     * @throws InvalidParamsException
+     */
+    public function callback(array|ServerRequestInterface|null $contents = null, ?array $params = null): Collection|Rocket
+    {
         $request = $this->getCallbackParams($contents);
 
+        Event::dispatch(new CallbackReceived(Pay::PROVIDER_WECHAT, clone $request, $params, null));
+
+        $action = ($params ?? [])['_action'] ?? null;
+
+        $plugin = match ($action) {
+            WechatAction::CALLBACK_VIRTUAL => VirtualCallbackPlugin::class,
+            default => CallbackPlugin::class,
+        };
+
         return $this->pay(
-            [CallbackPlugin::class], ['request' => $request, 'params' => $params]
-        );
-    }
-
-    public function success(): ResponseInterface
-    {
-        return new Response(
-            200,
-            ['Content-Type' => 'application/json'],
-            json_encode(['code' => 'SUCCESS', 'message' => '成功']),
-        );
-    }
-
-    public function mergeCommonPlugins(array $plugins): array
-    {
-        return array_merge(
-            [PreparePlugin::class],
-            $plugins,
-            [SignPlugin::class],
-            [LaunchPlugin::class, ParserPlugin::class],
+            [$plugin],
+            ['_request' => $request, '_params' => $params]
         );
     }
 
     /**
-     * @param array|ServerRequestInterface|null $contents
+     * @param array<string, mixed> $params
      */
-    protected function getCallbackParams($contents = null): ServerRequestInterface
+    public function success(array $params = []): ResponseInterface
     {
-        if (is_array($contents) && isset($contents['body']) && isset($contents['headers'])) {
+        $action = $params['_action'] ?? null;
+
+        if (WechatAction::SUCCESS_PAYSCORE === $action) {
+            return new Response(204, ['Content-Type' => 'application/json'], '');
+        }
+
+        [$contentType, $body] = match ($action) {
+            WechatAction::SUCCESS_VIRTUAL => match ($params['_format'] ?? null) {
+                'json' => ['application/json', json_encode(['ErrCode' => 0, 'ErrMsg' => 'success'])],
+                default => ['application/xml', '<xml><ErrCode>0</ErrCode><ErrMsg>success</ErrMsg></xml>'],
+            },
+            default => ['application/json', json_encode(['code' => 'SUCCESS', 'message' => '成功'])],
+        };
+
+        return new Response(200, ['Content-Type' => $contentType], $body);
+    }
+
+    /**
+     * @param null|array<string, mixed>|ServerRequestInterface $contents
+     */
+    protected function getCallbackParams(array|ServerRequestInterface|null $contents = null): ServerRequestInterface
+    {
+        if (is_array($contents) && isset($contents['body'], $contents['headers'])) {
             return new ServerRequest('POST', 'http://localhost', $contents['headers'], $contents['body']);
         }
 

@@ -4,66 +4,45 @@ declare(strict_types=1);
 
 namespace Yansongda\Pay\Contract;
 
+use Psr\Http\Message\MessageInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Yansongda\Artful\Rocket;
 use Yansongda\Supports\Collection;
 
 interface ProviderInterface
 {
     /**
-     * pay.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\InvalidParamsException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     *
-     * @return \Psr\Http\Message\MessageInterface|\Yansongda\Supports\Collection|array|null
+     * @param array<class-string>  $plugins
+     * @param array<string, mixed> $params
      */
-    public function pay(array $plugins, array $params);
+    public function pay(array $plugins, array $params): Collection|MessageInterface|Rocket|null;
 
     /**
-     * Quick road - Query an order.
-     *
-     * @param string|array $order
-     *
-     * @return array|\Yansongda\Supports\Collection
+     * @param array<string, mixed> $order
      */
-    public function find($order);
+    public function query(array $order): Collection|Rocket;
 
     /**
-     * Quick road - Cancel an order.
-     *
-     * @param string|array $order
-     *
-     * @return array|\Yansongda\Supports\Collection|void
+     * @param array<string, mixed> $order
      */
-    public function cancel($order);
+    public function cancel(array $order): Collection|Rocket;
 
     /**
-     * Quick road - Close an order.
-     *
-     * @param string|array $order
-     *
-     * @return array|\Yansongda\Supports\Collection|void
+     * @param array<string, mixed> $order
      */
-    public function close($order);
+    public function close(array $order): Collection|Rocket;
 
     /**
-     * Quick road - Refund an order.
-     *
-     * @return array|\Yansongda\Supports\Collection
+     * @param array<string, mixed> $order
      */
-    public function refund(array $order);
+    public function refund(array $order): Collection|Rocket;
 
     /**
-     * Verify a request.
-     *
-     * @param array|\Psr\Http\Message\ServerRequestInterface|null $contents
+     * @param null|array<string, mixed>|ServerRequestInterface $contents
+     * @param null|array<string, mixed>                        $params
      */
-    public function callback($contents = null, ?array $params = null): Collection;
+    public function callback(array|ServerRequestInterface|null $contents = null, ?array $params = null): Collection|ResponseInterface|Rocket;
 
-    /**
-     * Echo success to server.
-     */
     public function success(): ResponseInterface;
 }

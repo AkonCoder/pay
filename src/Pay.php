@@ -4,258 +4,172 @@ declare(strict_types=1);
 
 namespace Yansongda\Pay;
 
-use DI\Container;
-use DI\ContainerBuilder;
-use DI\DependencyException;
-use DI\NotFoundException;
-use Throwable;
-use Yansongda\Pay\Contract\ContainerInterface;
-use Yansongda\Pay\Contract\ServiceProviderInterface;
-use Yansongda\Pay\Exception\ContainerDependencyException;
-use Yansongda\Pay\Exception\ContainerException;
-use Yansongda\Pay\Exception\ContainerNotFoundException;
-use Yansongda\Pay\Exception\ServiceNotFoundException;
+use Closure;
+use Psr\Container\ContainerInterface;
+use Yansongda\Artful\Artful;
+use Yansongda\Artful\Contract\ConfigInterface;
+use Yansongda\Artful\Event\ArtfulEnd;
+use Yansongda\Artful\Event\ArtfulStart;
+use Yansongda\Artful\Event\HttpEnd;
+use Yansongda\Artful\Event\HttpStart;
+use Yansongda\Artful\Exception\ContainerException;
+use Yansongda\Artful\Exception\ServiceNotFoundException;
+use Yansongda\Pay\Provider\Airwallex;
 use Yansongda\Pay\Provider\Alipay;
+use Yansongda\Pay\Provider\Allinpay;
+use Yansongda\Pay\Provider\Apple;
+use Yansongda\Pay\Provider\Bestpay;
+use Yansongda\Pay\Provider\Douyin;
+use Yansongda\Pay\Provider\Jsb;
+use Yansongda\Pay\Provider\Paypal;
+use Yansongda\Pay\Provider\Stripe;
+use Yansongda\Pay\Provider\Unipay;
 use Yansongda\Pay\Provider\Wechat;
+use Yansongda\Pay\Service\AirwallexServiceProvider;
 use Yansongda\Pay\Service\AlipayServiceProvider;
-use Yansongda\Pay\Service\ConfigServiceProvider;
-use Yansongda\Pay\Service\EventServiceProvider;
-use Yansongda\Pay\Service\HttpServiceProvider;
-use Yansongda\Pay\Service\LoggerServiceProvider;
+use Yansongda\Pay\Service\AllinpayServiceProvider;
+use Yansongda\Pay\Service\AppleServiceProvider;
+use Yansongda\Pay\Service\BestpayServiceProvider;
+use Yansongda\Pay\Service\DouyinServiceProvider;
+use Yansongda\Pay\Service\JsbServiceProvider;
+use Yansongda\Pay\Service\PaypalServiceProvider;
+use Yansongda\Pay\Service\StripeServiceProvider;
+use Yansongda\Pay\Service\UnipayServiceProvider;
 use Yansongda\Pay\Service\WechatServiceProvider;
 
 /**
- * @method static Alipay alipay(array $config = [])
- * @method static Wechat wechat(array $config = [])
+ * @method static Alipay    alipay(array<string, mixed> $config = [], $container = null)
+ * @method static Airwallex airwallex(array<string, mixed> $config = [], $container = null)
+ * @method static Wechat    wechat(array<string, mixed> $config = [], $container = null)
+ * @method static Unipay    unipay(array<string, mixed> $config = [], $container = null)
+ * @method static Jsb       jsb(array<string, mixed> $config = [], $container = null)
+ * @method static Douyin    douyin(array<string, mixed> $config = [], $container = null)
+ * @method static Paypal    paypal(array<string, mixed> $config = [], $container = null)
+ * @method static Stripe    stripe(array<string, mixed> $config = [], $container = null)
+ * @method static Allinpay  allinpay(array<string, mixed> $config = [], $container = null)
+ * @method static Bestpay   bestpay(array<string, mixed> $config = [], $container = null)
+ * @method static Apple     apple(array<string, mixed> $config = [], $container = null)
  */
 class Pay
 {
     /**
-     * 正常模式.
+     * Provider 名称常量.
      */
-    public const MODE_NORMAL = 0;
+    public const PROVIDER_WECHAT = 'wechat';
+    public const PROVIDER_ALIPAY = 'alipay';
+    public const PROVIDER_AIRWALLEX = 'airwallex';
+    public const PROVIDER_UNIPAY = 'unipay';
+    public const PROVIDER_JSB = 'jsb';
+    public const PROVIDER_DOUYIN = 'douyin';
+    public const PROVIDER_PAYPAL = 'paypal';
+    public const PROVIDER_STRIPE = 'stripe';
+    public const PROVIDER_ALLINPAY = 'allinpay';
+    public const PROVIDER_BESTPAY = 'bestpay';
+    public const PROVIDER_APPLE = 'apple';
 
     /**
-     * 沙箱模式.
+     * @var array<class-string>
      */
-    public const MODE_SANDBOX = 1;
-
-    /**
-     * 服务商模式.
-     */
-    public const MODE_SERVICE = 2;
-
-    /**
-     * @var string[]
-     */
-    protected $service = [
+    protected static array $providers = [
         AlipayServiceProvider::class,
+        AirwallexServiceProvider::class,
         WechatServiceProvider::class,
+        UnipayServiceProvider::class,
+        JsbServiceProvider::class,
+        DouyinServiceProvider::class,
+        PaypalServiceProvider::class,
+        StripeServiceProvider::class,
+        AllinpayServiceProvider::class,
+        BestpayServiceProvider::class,
+        AppleServiceProvider::class,
     ];
 
     /**
-     * @var string[]
-     */
-    private $coreService = [
-        ConfigServiceProvider::class,
-        LoggerServiceProvider::class,
-        EventServiceProvider::class,
-        HttpServiceProvider::class,
-    ];
-
-    /**
-     * @var \DI\Container|null
-     */
-    private static $container = null;
-
-    /**
-     * Bootstrap.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     */
-    private function __construct(array $config)
-    {
-        $this->initContainer();
-        $this->registerServices($config);
-    }
-
-    /**
-     * __callStatic.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
+     * @param array<string, mixed> $config
      *
      * @return mixed
+     *
+     * @throws ContainerException
+     * @throws ServiceNotFoundException
      */
-    public static function __callStatic(string $service, array $config)
+    public static function __callStatic(string $service, array $config = [])
     {
         if (!empty($config)) {
             self::config(...$config);
         }
 
-        return self::get($service);
+        return Artful::get($service);
     }
 
     /**
-     * 初始化容器、配置等信息.
+     * @param array<string, mixed>|Config $config
      *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
+     * @throws ContainerException
      */
-    public static function config(array $config = []): Pay
+    public static function config(array|Config $config = [], Closure|ContainerInterface|null $container = null): bool
     {
-        if (self::hasContainer() && !($config['_force'] ?? false)) {
-            return self::get(Pay::class);
+        $force = is_array($config) && ($config['_force'] ?? false);
+
+        if (!$force && self::isAlreadyConfigured()) {
+            return false;
         }
 
-        return new self($config);
-    }
+        $configObject = is_array($config) ? new Config($config) : $config;
+        $runtimeConfig = $configObject->all();
 
-    /**
-     * 定义.
-     *
-     * @param mixed $value
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     */
-    public static function set(string $name, $value): void
-    {
-        Pay::getContainer()->set($name, $value);
-    }
+        // Force Artful::config() to execute by setting _force in runtime config
+        $runtimeConfig['_force'] = true;
 
-    /**
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     *
-     * @return mixed
-     */
-    public static function make(string $service, array $parameters = [])
-    {
-        try {
-            return Pay::getContainer()->make(...func_get_args());
-        } catch (NotFoundException $e) {
-            throw new ServiceNotFoundException($e->getMessage());
-        } catch (DependencyException $e) {
-            throw new ContainerDependencyException($e->getMessage());
-        } catch (Throwable $e) {
-            throw new ContainerException($e->getMessage());
-        }
-    }
+        $result = Artful::config($runtimeConfig, $container);
 
-    /**
-     * 获取服务.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     *
-     * @return mixed
-     */
-    public static function get(string $service)
-    {
-        try {
-            return Pay::getContainer()->get($service);
-        } catch (NotFoundException $e) {
-            throw new ServiceNotFoundException($e->getMessage());
-        } catch (DependencyException $e) {
-            throw new ContainerDependencyException($e->getMessage());
-        } catch (Throwable $e) {
-            throw new ContainerException($e->getMessage());
-        }
-    }
-
-    /**
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     */
-    public static function has(string $service): bool
-    {
-        return Pay::getContainer()->has($service);
-    }
-
-    /**
-     * getContainer.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerNotFoundException
-     */
-    public static function getContainer(): Container
-    {
-        if (self::hasContainer()) {
-            return self::$container;
+        if ($result) {
+            Event::addListener(ArtfulStart::class, [PayListener::class, 'artfulStart']);
+            Event::addListener(ArtfulEnd::class, [PayListener::class, 'artfulEnd']);
+            Event::addListener(HttpStart::class, [PayListener::class, 'httpStart']);
+            Event::addListener(HttpEnd::class, [PayListener::class, 'httpEnd']);
         }
 
-        throw new ContainerNotFoundException('You should init/config PAY first', Exception\Exception::CONTAINER_NOT_FOUND);
+        foreach (self::$providers as $provider) {
+            Artful::load($provider);
+        }
+
+        return $result;
     }
 
     /**
-     * has Container.
+     * @throws ContainerException
      */
-    public static function hasContainer(): bool
+    public static function set(string $name, mixed $value): void
     {
-        return isset(self::$container) && self::$container instanceof Container;
+        Artful::set($name, $value);
     }
 
     /**
-     * clear.
+     * @throws ContainerException
+     * @throws ServiceNotFoundException
      */
+    public static function get(string $service): mixed
+    {
+        return Artful::get($service);
+    }
+
+    public static function setContainer(Closure|ContainerInterface|null $container): void
+    {
+        Artful::setContainer($container);
+    }
+
     public static function clear(): void
     {
-        self::$container = null;
+        Artful::clear();
+        CertManager::clearCache();
     }
 
-    /**
-     * 注册服务.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     */
-    public static function registerService(string $service, array $config): void
+    private static function isAlreadyConfigured(): bool
     {
-        $var = self::get($service);
-
-        if ($var instanceof ServiceProviderInterface) {
-            $var->register(self::get(Pay::class), $config);
-        }
-    }
-
-    /**
-     * initContainer.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     */
-    private function initContainer(): void
-    {
-        $builder = new ContainerBuilder();
-        $builder->useAnnotations(false);
-
         try {
-            $container = $builder->build();
-            $container->set(ContainerInterface::class, $container);
-            $container->set(\Psr\Container\ContainerInterface::class, $container);
-            $container->set(Pay::class, $this);
-
-            self::$container = $container;
-        } catch (Throwable $e) {
-            throw new ContainerException($e->getMessage());
-        }
-    }
-
-    /**
-     * register services.
-     *
-     * @throws \Yansongda\Pay\Exception\ContainerDependencyException
-     * @throws \Yansongda\Pay\Exception\ContainerException
-     * @throws \Yansongda\Pay\Exception\ServiceNotFoundException
-     */
-    private function registerServices(array $config): void
-    {
-        foreach (array_merge($this->coreService, $this->service) as $service) {
-            self::registerService($service, $config);
+            return Artful::has(ConfigInterface::class);
+        } catch (ContainerException) {
+            return false;
         }
     }
 }
